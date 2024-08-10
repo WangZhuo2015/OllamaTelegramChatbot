@@ -1,8 +1,11 @@
 # Ollama Telegram Chatbot
 
-This project is a simple Telegram bot built using `ollama` and `aiogram`. The bot is capable of
-handling user queries and generating responses.
+![GitHub license](https://img.shields.io/github/license/WangZhuo2015/OllamaTelegramChatbot)
+![GitHub stars](https://img.shields.io/github/stars/WangZhuo2015/OllamaTelegramChatbot?style=social)
+![GitHub forks](https://img.shields.io/github/forks/WangZhuo2015/OllamaTelegramChatbot?style=social)
+![GitHub issues](https://img.shields.io/github/issues/WangZhuo2015/OllamaTelegramChatbot)
 
+This project is a simple Telegram bot built using `ollama` and `aiogram`. The bot is capable of handling user queries and generating responses.
 ## Features
 
 - **Proxy Support (Optional)**: Configurable HTTP/Socks proxy for connecting to Telegram if needed.
@@ -56,4 +59,4 @@ Contributions are welcome! Please fork the repository and submit a pull request.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE.md) file for more details.

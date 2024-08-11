@@ -20,16 +20,19 @@ session = AiohttpSession(proxy=os.getenv("PROXY_URL"))
 bot = Bot(token=TOKEN, session=session) if os.getenv("PROXY_URL") else Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Global lock to make user messages sequential
+# Global lock to ensure sequential processing of user messages
 lock = asyncio.Lock()
-# {user: [context]}
+# Dictionary to store active sessions: {user: [context]}
 active_sessions = {}
 
+# Inline keyboard for start command
 start_kb = InlineKeyboardBuilder()
 start_kb.row(
     types.InlineKeyboardButton(text="ℹ️ About", callback_data="about"),
     types.InlineKeyboardButton(text="⚙️ Settings", callback_data="settings"),
 )
+
+# List of bot commands with descriptions
 commands = [
     types.BotCommand(command="start", description="Start"),
     types.BotCommand(command="reset", description="Reset Context"),
@@ -37,6 +40,7 @@ commands = [
 ]
 
 
+# Decorator to check if the user is authorized
 def requires_authorization(func):
     @wraps(func)
     async def wrapped(message: types.Message, *args, **kwargs):
@@ -61,9 +65,12 @@ async def command_start_handler(message: types.Message):
 
 @dp.message(Command("reset"))
 async def command_reset_handler(message: types.Message):
-    await message.answer("Chat has been reset.")
+    user_id = message.from_user.id
+    reset_context(user_id)
+    await message.answer("Chat has been reset. A new session has been created.")
 
 
+# Function to create an inline authorize button for user authorization
 def create_authorize_button(user_id):
     button = InlineKeyboardButton(text="Authorize", callback_data=f"authorize:{user_id}")
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[button]])
@@ -110,6 +117,7 @@ async def handle_user_id_input(message: types.Message):
         await handle_message(message)
 
 
+# Handle incoming messages from authorized users
 @dp.message()
 @requires_authorization
 async def handle_message(message: types.Message):
@@ -117,23 +125,23 @@ async def handle_message(message: types.Message):
         logging.info(f"Handle message from {message.from_user.full_name}: {message.text}")
         prompt = message.text
 
-        # 获取当前session的上下文
+        # Get the current session context for the user
         user_id = message.from_user.id
 
-        # 如果还没有active session，创建一个新的，或者从数据库加载
+        # If no active session exists, create a new one or load from the database
         if user_id not in active_sessions:
             user = db_session.query(User).filter_by(platform_user_id=user_id).first()
             if user and user.active_session_id:
-                # 从数据库加载当前session的上下文
+                # Load the current session context from the database
                 context_entries = db_session.query(Context).filter_by(session_id=user.active_session_id).order_by(
                     Context.entry_id).all()
                 active_sessions[user_id] = [json.loads(entry.context_data) for entry in context_entries]
             else:
                 create_new_session(user_id)
 
-        context_entries = get_active_context(user_id)  # 获取内容数据
+        context_entries = get_active_context(user_id)  # Get the context data
 
-        # 记录用户的输入
+        # Record the user's input
         add_context_entry(db_session.query(User).filter_by(platform_user_id=user_id).first().active_session_id, user_id,
                           {'role': 'user', 'content': prompt})
 
@@ -141,11 +149,11 @@ async def handle_message(message: types.Message):
         partial_sent = ""
         initial_message = await message.answer("typing...")
 
-        # 生成回复
+        # Generate a response using the context
         async for part in generate_response(context_entries):
             full_response += part
 
-            # 在回复完整的一句话后更新消息
+            # Update the message after a complete sentence
             if any(full_response.endswith(c) for c in ".!?") and full_response != partial_sent:
                 await bot.edit_message_text(
                     text=full_response + "...",
@@ -155,11 +163,11 @@ async def handle_message(message: types.Message):
                 partial_sent = full_response
 
         if full_response:
-            # 记录机器人的回复
+            # Record the bot's response
             add_context_entry(db_session.query(User).filter_by(platform_user_id=user_id).first().active_session_id,
                               user_id, {'role': 'assistant', 'content': full_response})
 
-            # 发送最终回复
+            # Send the final response
             await bot.edit_message_text(
                 text=f"{full_response}",
                 chat_id=message.chat.id,
@@ -167,14 +175,15 @@ async def handle_message(message: types.Message):
             )
 
 
+# Create a new session for the user
 def create_new_session(user_id):
     new_session_id = db_session.query(func.max(Context.session_id)).scalar() or 0
     new_session_id += 1
 
-    # 初始化内存中的session
+    # Initialize the session in memory
     active_sessions[user_id] = []
 
-    # 更新用户表中的active_session_id
+    # Update the user's active session ID in the database
     user = db_session.query(User).filter_by(platform_user_id=user_id).first()
     user.active_session_id = new_session_id
     db_session.commit()
@@ -182,35 +191,31 @@ def create_new_session(user_id):
     return new_session_id
 
 
+# Add a new context entry to the session
 def add_context_entry(session_id, user_id, context_data):
-    # 将context_data字典转换为JSON字符串
+    # Convert the context_data dictionary to a JSON string
     context_data_json = json.dumps(context_data)
 
-    # 将新条目添加到内存中的session
+    # Append the new entry to the session in memory
     active_sessions[user_id].append(context_data)
 
-    # 将新的上下文数据保存到数据库中
+    # Save the new context data to the database
     new_entry = Context(
         session_id=session_id,
         entry_id=len(active_sessions[user_id]) - 1,
         user_id=user_id,
-        context_data=context_data_json  # 存储为JSON字符串
+        context_data=context_data_json  # Store as a JSON string
     )
     db_session.add(new_entry)
     db_session.commit()
 
 
+# Get the active context for the user
 def get_active_context(user_id):
     return active_sessions.get(user_id, [])
 
 
+# Reset the context for the user, creating a new session
 def reset_context(user_id):
     new_session_id = create_new_session(user_id)
     return new_session_id
-
-
-@dp.message(Command("reset"))
-async def command_reset_handler(message: types.Message):
-    user_id = message.from_user.id
-    reset_context(user_id)
-    await message.answer("Chat has been reset. A new session has been created.")

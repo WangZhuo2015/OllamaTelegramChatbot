@@ -3,3 +3,5 @@ aiohttp
 python-dotenv
 ollama
 aiohttp-socks
+sqlalchemy
+sqlite3

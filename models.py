@@ -38,6 +38,7 @@ class User(Base):
     email = Column(String, nullable=True)
     joined_at = Column(DateTime, default=datetime.datetime.utcnow)
     last_active = Column(DateTime, default=datetime.datetime.utcnow)
+    active_session_id = Column(Integer, nullable=True)
 
 
 class Platform(Base):
@@ -46,6 +47,17 @@ class Platform(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     description = Column(String, nullable=True)
+
+
+class Context(Base):
+    __tablename__ = 'contexts'
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, nullable=False)  # 之前的group_id现在叫做session_id
+    entry_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=False)
+    context_data = Column(String, nullable=False)  # JSON数据
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 def init_db():

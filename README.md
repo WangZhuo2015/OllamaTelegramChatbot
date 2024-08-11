@@ -13,10 +13,10 @@ This project is a simple Telegram bot built using `ollama` and `aiogram`. The bo
 
 ## Planned Features
 
-- [ ]  **User Identity Control**: Implement authentication and authorization to manage user access and permissions.
-- [ ]  **Chat History Persistence**: Store chat history in a database to enable session continuity and data recovery.
+- [X]  **User Identity Control**: Implement authentication and authorization to manage user access and permissions.
+- [X]  **Chat History Persistence**: Store chat history in a database to enable session continuity and data recovery.
 - [ ]  **User Archiving**: Enable users to archive and retrieve previous chat sessions.
-- [ ]  **Request Queue Management**: Queue user requests to manage load and ensure fair processing.
+- [X]  **Request Queue Management**: Queue user requests to manage load and ensure fair processing.
 - [ ]  **Containerization**: Deploy the bot using Docker to simplify deployment and scalability.
 - [ ]  **Model Switching**: Allow users to switch between different models for varied interactions.
 

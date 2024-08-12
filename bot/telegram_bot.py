@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from functools import wraps
 
 from aiogram import Bot, Dispatcher, types
@@ -12,9 +13,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import func
 
-from bot.ollama_integration import generate_response
+from bot.ollama_integration import generate_response, model_list
 from models import User, db_session, Context
-from utils.config import TOKEN, ADMIN_IDS
+from utils.config import TOKEN, ADMIN_IDS, INITMODEL
 
 session = AiohttpSession(proxy=os.getenv("PROXY_URL"))
 bot = Bot(token=TOKEN, session=session) if os.getenv("PROXY_URL") else Bot(token=TOKEN)
@@ -30,6 +31,7 @@ start_kb = InlineKeyboardBuilder()
 start_kb.row(
     types.InlineKeyboardButton(text="ℹ️ About", callback_data="about"),
     types.InlineKeyboardButton(text="⚙️ Settings", callback_data="settings"),
+    types.InlineKeyboardButton(text="🔄 Switch Model", callback_data="switchModel"),
 )
 
 # List of bot commands with descriptions
@@ -63,8 +65,43 @@ async def command_start_handler(message: types.Message):
     )
 
 
+@dp.callback_query(lambda query: query.data == "switchModel")
+async def switch_model_callback_handler(query: types.CallbackQuery):
+    models = (await model_list())["models"]
+    model_selector = InlineKeyboardBuilder()
+    for model in models:
+        model_name = model["name"]
+        parameter_size = model["details"]["parameter_size"]
+        model_selector.row(
+            types.InlineKeyboardButton(
+                text=f"{model_name} - {parameter_size}", callback_data=f"model_{model_name}"
+            )
+        )
+    await query.message.edit_text(
+        f"{len(models)} models available.", reply_markup=model_selector.as_markup(),
+    )
+
+
+@dp.callback_query(lambda query: query.data.startswith("model_"))
+async def model_callback_handler(query: types.CallbackQuery):
+    selected_model = query.data.split("model_")[1]
+    user_id = query.from_user.id
+
+    # Update the user's current model in the database
+    user = db_session.query(User).filter_by(platform_user_id=user_id).first()
+    if user:
+        user.model = selected_model
+        db_session.commit()
+        await query.answer(f"Model switched to {selected_model}!")
+    else:
+        await query.answer(f"User not found. Please try again.")
+
+    await query.message.edit_reply_markup()  # Remove buttons after selection
+
+
 @dp.message(Command("reset"))
 async def command_reset_handler(message: types.Message):
+    dp['waiting_for_user_id'] = None
     user_id = message.from_user.id
     reset_context(user_id)
     await message.answer("Chat has been reset. A new session has been created.")
@@ -128,9 +165,9 @@ async def handle_message(message: types.Message):
         # Get the current session context for the user
         user_id = message.from_user.id
 
+        user = db_session.query(User).filter_by(platform_user_id=user_id).first()
         # If no active session exists, create a new one or load from the database
         if user_id not in active_sessions:
-            user = db_session.query(User).filter_by(platform_user_id=user_id).first()
             if user and user.active_session_id:
                 # Load the current session context from the database
                 context_entries = db_session.query(Context).filter_by(session_id=user.active_session_id).order_by(
@@ -147,18 +184,19 @@ async def handle_message(message: types.Message):
 
         full_response = ""
         partial_sent = ""
-        initial_message = await message.answer("typing...")
+        initial_message = await message.answer("typing...", parse_mode=ParseMode.MARKDOWN, )
 
         # Generate a response using the context
-        async for part in generate_response(context_entries):
+        async for part in generate_response(context_entries, model=user.model or INITMODEL):
             full_response += part
 
             # Update the message after a complete sentence
-            if any(full_response.endswith(c) for c in ".!?") and full_response != partial_sent:
+            if is_sentence_end(full_response, partial_sent, custom_regex=None) and full_response != partial_sent:
                 await bot.edit_message_text(
                     text=full_response + "...",
                     chat_id=message.chat.id,
-                    message_id=initial_message.message_id
+                    message_id=initial_message.message_id,
+                    parse_mode=ParseMode.MARKDOWN,
                 )
                 partial_sent = full_response
 
@@ -169,16 +207,20 @@ async def handle_message(message: types.Message):
 
             # Send the final response
             await bot.edit_message_text(
-                text=f"{full_response}",
+                # if LOGLEVEL=DEBUG, add model name to the response
+                text=f"{full_response} \n\n*Generated by {user.model or INITMODEL}*" if os.getenv(
+                    "LOGLEVEL") == "DEBUG" else full_response,
                 chat_id=message.chat.id,
-                message_id=initial_message.message_id
+                message_id=initial_message.message_id,
+                parse_mode=ParseMode.MARKDOWN,
             )
 
 
 # Create a new session for the user
 def create_new_session(user_id):
+    # Get the current maximum session_id from the table, or start from 0 if none exist
     new_session_id = db_session.query(func.max(Context.session_id)).scalar() or 0
-    new_session_id += 1
+    new_session_id += 1  # Increment to get a new session ID
 
     # Initialize the session in memory
     active_sessions[user_id] = []
@@ -186,6 +228,8 @@ def create_new_session(user_id):
     # Update the user's active session ID in the database
     user = db_session.query(User).filter_by(platform_user_id=user_id).first()
     user.active_session_id = new_session_id
+
+    # Commit the new session_id to the database
     db_session.commit()
 
     return new_session_id
@@ -219,3 +263,16 @@ def get_active_context(user_id):
 def reset_context(user_id):
     new_session_id = create_new_session(user_id)
     return new_session_id
+
+
+def is_sentence_end(full_response, partial_sent, custom_regex=None):
+    # Default regex pattern for sentence end
+    default_regex = r"[.!?。！？]\s*$"
+
+    # Use custom regex if provided, otherwise use the default one
+    regex = custom_regex if custom_regex else default_regex
+
+    # Check if the response matches the regex pattern and is not the same as the partial_sent
+    if re.search(regex, full_response) and full_response != partial_sent:
+        return True
+    return False

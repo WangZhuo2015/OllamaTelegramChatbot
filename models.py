@@ -39,6 +39,7 @@ class User(Base):
     joined_at = Column(DateTime, default=datetime.datetime.utcnow)
     last_active = Column(DateTime, default=datetime.datetime.utcnow)
     active_session_id = Column(Integer, nullable=True)
+    model = Column(String, nullable=True)
 
 
 class Platform(Base):

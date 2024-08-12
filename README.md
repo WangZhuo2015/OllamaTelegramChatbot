@@ -18,7 +18,7 @@ This project is a simple Telegram bot built using `ollama` and `aiogram`. The bo
 - [ ]  **User Archiving**: Enable users to archive and retrieve previous chat sessions.
 - [X]  **Request Queue Management**: Queue user requests to manage load and ensure fair processing.
 - [ ]  **Containerization**: Deploy the bot using Docker to simplify deployment and scalability.
-- [ ]  **Model Switching**: Allow users to switch between different models for varied interactions.
+- [X]  **Model Switching**: Allow users to switch between different models for varied interactions.
 
 ## Installation
 
